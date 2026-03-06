@@ -1,5 +1,5 @@
 # Chrome DevTools MCP
-
+feat/navarrete115-biblioteca-scaffold):
 [![npm chrome-devtools-mcp package](https://img.shields.io/npm/v/chrome-devtools-mcp.svg)](https://npmjs.org/package/chrome-devtools-mcp)
 
 `chrome-devtools-mcp` lets your coding agent (such as Gemini, Claude, Cursor or Copilot)
