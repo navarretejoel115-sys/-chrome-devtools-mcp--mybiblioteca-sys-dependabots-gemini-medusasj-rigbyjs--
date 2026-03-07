@@ -8,6 +8,7 @@
   auto-accept installation prompt.
 - Find a specific error in the output of the `chrome-devtools-mcp` server.
   Usually, if your client is an IDE, logs would be in the Output pane.
+- Search the [GitHub repository issues and discussions](https://github.com/ChromeDevTools/chrome-devtools-mcp) for help or existing similar problems.
 
 ## Debugging
 
@@ -98,3 +99,38 @@ Possible workarounds include:
      `npx chrome-devtools-mcp --browser-url http://127.0.0.1:9222`
 
 - **Use Powershell or Git Bash** instead of WSL.
+
+### Windows 10: Error during discovery for MCP server 'chrome-devtools': MCP error -32000: Connection closed
+
+- **Solution 1** Call using `cmd` (For more info https://github.com/modelcontextprotocol/servers/issues/1082#issuecomment-2791786310)
+
+  ```json
+  "mcpServers": {
+      "chrome-devtools": {
+        "command": "cmd",
+        "args": ["/c", "npx", "-y", "chrome-devtools-mcp@latest"]
+      }
+    }
+  ```
+
+  > **The Key Change:** On Windows, running a Node.js package via `npx` often requires the `cmd /c` prefix to be executed correctly from within another process like VSCode's extension host. Therefore, `"command": "npx"` was replaced with `"command": "cmd"`, and the actual `npx` command was moved into the `"args"` array, preceded by `"/c"`. This fix allows Windows to interpret the command correctly and launch the server.
+
+- **Solution 2** Instead of another layer of shell you can write the absolute path to `npx`:
+  > Note: The path below is an example. You must adjust it to match the actual location of `npx` on your machine. Depending on your setup, the file extension might be `.cmd`, `.bat`, or `.exe` rather than `.ps1`. Also, ensure you use double backslashes (`\\`) as path delimiters, as required by the JSON format.
+  ```json
+  "mcpServers": {
+      "chrome-devtools": {
+        "command": "C:\\nvm4w\\nodejs\\npx.ps1",
+        "args": ["-y", "chrome-devtools-mcp@latest"]
+      }
+    }
+  ```
+
+### Connection timeouts with `--autoConnect`
+
+If you are using the `--autoConnect` flag and tools like `list_pages`, `new_page`, or `navigate_page` fail with a timeout (e.g., `ProtocolError: Network.enable timed out` or `The socket connection was closed unexpectedly`), this usually means the MCP server cannot handshake with the running Chrome instance correctly. Ensure:
+
+1. Chrome 144+ is **already** running.
+2. Remote debugging is enabled in Chrome via `chrome://inspect/#remote-debugging`.
+3. You have allowed the remote debugging connection prompt in the browser.
+4. There is no other MCP server or tool trying to connect to the same debugging port.

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import {execSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,12 +20,11 @@ import {puppeteer} from './third_party/index.js';
 
 let browser: Browser | undefined;
 
-function makeTargetFilter() {
-  const ignoredPrefixes = new Set([
-    'chrome://',
-    'chrome-extension://',
-    'chrome-untrusted://',
-  ]);
+function makeTargetFilter(enableExtensions = false) {
+  const ignoredPrefixes = new Set(['chrome://', 'chrome-untrusted://']);
+  if (!enableExtensions) {
+    ignoredPrefixes.add('chrome-extension://');
+  }
 
   return function targetFilter(target: Target): boolean {
     if (target.url() === 'chrome://newtab/') {
@@ -50,18 +50,20 @@ export async function ensureBrowserConnected(options: {
   devtools: boolean;
   channel?: Channel;
   userDataDir?: string;
+  enableExtensions?: boolean;
 }) {
-  const {channel} = options;
+  const {channel, enableExtensions} = options;
   if (browser?.connected) {
     return browser;
   }
 
   const connectOptions: Parameters<typeof puppeteer.connect>[0] = {
-    targetFilter: makeTargetFilter(),
+    targetFilter: makeTargetFilter(enableExtensions),
     defaultViewport: null,
     handleDevToolsAsPage: true,
   };
 
+  let autoConnect = false;
   if (options.wsEndpoint) {
     connectOptions.browserWSEndpoint = options.wsEndpoint;
     if (options.wsHeaders) {
@@ -72,6 +74,7 @@ export async function ensureBrowserConnected(options: {
   } else if (channel || options.userDataDir) {
     const userDataDir = options.userDataDir;
     if (userDataDir) {
+      autoConnect = true;
       // TODO: re-expose this logic via Puppeteer.
       const portPath = path.join(userDataDir, 'DevToolsActivePort');
       try {
@@ -95,7 +98,7 @@ export async function ensureBrowserConnected(options: {
         connectOptions.browserWSEndpoint = browserWSEndpoint;
       } catch (error) {
         throw new Error(
-          `Could not connect to Chrome in ${userDataDir}. Check if Chrome is running and remote debugging is enabled.`,
+          `Could not connect to Chrome in ${userDataDir}. Check if Chrome is running and remote debugging is enabled by going to chrome://inspect/#remote-debugging.`,
           {
             cause: error,
           },
@@ -120,7 +123,7 @@ export async function ensureBrowserConnected(options: {
     browser = await puppeteer.connect(connectOptions);
   } catch (err) {
     throw new Error(
-      'Could not connect to Chrome. Check if Chrome is running and remote debugging is enabled by going to chrome://inspect/#remote-debugging.',
+      `Could not connect to Chrome. ${autoConnect ? `Check if Chrome is running and remote debugging is enabled by going to chrome://inspect/#remote-debugging.` : `Check if Chrome is running.`}`,
       {
         cause: err,
       },
@@ -146,6 +149,25 @@ interface McpLaunchOptions {
   ignoreDefaultChromeArgs?: string[];
   devtools: boolean;
   enableExtensions?: boolean;
+  viaCli?: boolean;
+}
+
+export function detectDisplay(): void {
+  // Only detect display on Linux/UNIX.
+  if (os.platform() === 'win32' || os.platform() === 'darwin') {
+    return;
+  }
+  if (!process.env['DISPLAY']) {
+    try {
+      const result = execSync(
+        `ps -u $(id -u) -o pid= | xargs -I{} cat /proc/{}/environ 2>/dev/null | tr '\\0' '\\n' | grep -m1 '^DISPLAY=' | cut -d= -f2`,
+      );
+      const display = result.toString('utf8').trim();
+      process.env['DISPLAY'] = display;
+    } catch {
+      // no-op
+    }
+  }
 }
 
 export async function launch(options: McpLaunchOptions): Promise<Browser> {
@@ -160,7 +182,7 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
     userDataDir = path.join(
       os.homedir(),
       '.cache',
-      'chrome-devtools-mcp',
+      options.viaCli ? 'chrome-devtools-mcp-cli' : 'chrome-devtools-mcp',
       profileDirName,
     );
     await fs.promises.mkdir(userDataDir, {
@@ -189,10 +211,14 @@ export async function launch(options: McpLaunchOptions): Promise<Browser> {
         : 'chrome';
   }
 
+  if (!headless) {
+    detectDisplay();
+  }
+
   try {
     const browser = await puppeteer.launch({
       channel: puppeteerChannel,
-      targetFilter: makeTargetFilter(),
+      targetFilter: makeTargetFilter(options.enableExtensions),
       executablePath,
       defaultViewport: null,
       userDataDir,

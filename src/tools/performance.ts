@@ -17,7 +17,7 @@ import {
 
 import {ToolCategory} from './categories.js';
 import type {Context, Response} from './ToolDefinition.js';
-import {defineTool} from './ToolDefinition.js';
+import {definePageTool} from './ToolDefinition.js';
 
 const filePathSchema = zod
   .string()
@@ -26,9 +26,9 @@ const filePathSchema = zod
     'The absolute file path, or a file path relative to the current working directory, to save the raw trace data. For example, trace.json.gz (compressed) or trace.json (uncompressed).',
   );
 
-export const startTrace = defineTool({
+export const startTrace = definePageTool({
   name: 'performance_start_trace',
-  description: `Starts a performance trace recording on the selected page. This can be used to look for performance problems and insights to improve the performance of the page. It will also report Core Web Vital (CWV) scores for the page.`,
+  description: `Start a performance trace on the selected webpage. Use to find frontend performance issues, Core Web Vitals (LCP, INP, CLS), and improve page load speed.`,
   annotations: {
     category: ToolCategory.PERFORMANCE,
     readOnlyHint: false,
@@ -36,11 +36,13 @@ export const startTrace = defineTool({
   schema: {
     reload: zod
       .boolean()
+      .default(true)
       .describe(
         'Determines if, once tracing has started, the current selected page should be automatically reloaded. Navigate the page to the right URL using the navigate_page tool BEFORE starting the trace if reload or autoStop is set to true.',
       ),
     autoStop: zod
       .boolean()
+      .default(true)
       .describe(
         'Determines if the trace recording should be automatically stopped.',
       ),
@@ -55,12 +57,12 @@ export const startTrace = defineTool({
     }
     context.setIsRunningPerformanceTrace(true);
 
-    const page = context.getSelectedPage();
-    const pageUrlForTracing = page.url();
+    const page = request.page;
+    const pageUrlForTracing = page.pptrPage.url();
 
     if (request.params.reload) {
       // Before starting the recording, navigate to about:blank to clear out any state.
-      await page.goto('about:blank', {
+      await page.pptrPage.goto('about:blank', {
         waitUntil: ['networkidle0'],
       });
     }
@@ -86,12 +88,12 @@ export const startTrace = defineTool({
       'v8.execute',
       'v8',
     ];
-    await page.tracing.start({
+    await page.pptrPage.tracing.start({
       categories,
     });
 
     if (request.params.reload) {
-      await page.goto(pageUrlForTracing, {
+      await page.pptrPage.goto(pageUrlForTracing, {
         waitUntil: ['load'],
       });
     }
@@ -99,7 +101,7 @@ export const startTrace = defineTool({
     if (request.params.autoStop) {
       await new Promise(resolve => setTimeout(resolve, 5_000));
       await stopTracingAndAppendOutput(
-        page,
+        page.pptrPage,
         response,
         context,
         request.params.filePath,
@@ -112,10 +114,10 @@ export const startTrace = defineTool({
   },
 });
 
-export const stopTrace = defineTool({
+export const stopTrace = definePageTool({
   name: 'performance_stop_trace',
   description:
-    'Stops the active performance trace recording on the selected page.',
+    'Stop the active performance trace recording on the selected webpage.',
   annotations: {
     category: ToolCategory.PERFORMANCE,
     readOnlyHint: false,
@@ -127,9 +129,9 @@ export const stopTrace = defineTool({
     if (!context.isRunningPerformanceTrace()) {
       return;
     }
-    const page = context.getSelectedPage();
+    const page = request.page;
     await stopTracingAndAppendOutput(
-      page,
+      page.pptrPage,
       response,
       context,
       request.params.filePath,
@@ -137,7 +139,7 @@ export const stopTrace = defineTool({
   },
 });
 
-export const analyzeInsight = defineTool({
+export const analyzeInsight = definePageTool({
   name: 'performance_analyze_insight',
   description:
     'Provides more detailed information on a specific Performance Insight of an insight set that was highlighted in the results of a trace recording.',

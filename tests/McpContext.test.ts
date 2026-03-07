@@ -22,18 +22,18 @@ describe('McpContext', () => {
 
   it('list pages', async () => {
     await withMcpContext(async (_response, context) => {
-      const page = context.getSelectedPage();
-      await page.setContent(
+      const page = context.getSelectedMcpPage();
+      await page.pptrPage.setContent(
         html`<button>Click me</button>
           <input
             type="text"
             value="Input"
           />`,
       );
-      await context.createTextSnapshot();
-      assert.ok(await context.getElementByUid('1_1'));
-      await context.createTextSnapshot();
-      await context.getElementByUid('1_1');
+      await context.createTextSnapshot(context.getSelectedMcpPage());
+      assert.ok(await page.getElementByUid('1_1'));
+      await context.createTextSnapshot(context.getSelectedMcpPage());
+      await page.getElementByUid('1_1');
     });
   });
 
@@ -50,9 +50,9 @@ describe('McpContext', () => {
   it('should update default timeout when cpu throttling changes', async () => {
     await withMcpContext(async (_response, context) => {
       const page = await context.newPage();
-      const timeoutBefore = page.getDefaultTimeout();
+      const timeoutBefore = page.pptrPage.getDefaultTimeout();
       await context.emulate({cpuThrottlingRate: 2});
-      const timeoutAfter = page.getDefaultTimeout();
+      const timeoutAfter = page.pptrPage.getDefaultTimeout();
       assert(timeoutBefore < timeoutAfter, 'Timeout was less then expected');
     });
   });
@@ -60,9 +60,9 @@ describe('McpContext', () => {
   it('should update default timeout when network conditions changes', async () => {
     await withMcpContext(async (_response, context) => {
       const page = await context.newPage();
-      const timeoutBefore = page.getDefaultNavigationTimeout();
+      const timeoutBefore = page.pptrPage.getDefaultNavigationTimeout();
       await context.emulate({networkConditions: 'Slow 3G'});
-      const timeoutAfter = page.getDefaultNavigationTimeout();
+      const timeoutAfter = page.pptrPage.getDefaultNavigationTimeout();
       assert(timeoutBefore < timeoutAfter, 'Timeout was less then expected');
     });
   });
@@ -81,7 +81,7 @@ describe('McpContext', () => {
         // trigger the waiting only
       });
 
-      sinon.assert.calledWithExactly(stub, page, 2, 10);
+      sinon.assert.calledWithExactly(stub, page.pptrPage, 2, 10);
     });
   });
 
@@ -94,13 +94,42 @@ describe('McpContext', () => {
         // https://github.com/puppeteer/puppeteer/issues/14368 is there.
         await new Promise(resolve => setTimeout(resolve, 5000));
         await context.createPagesSnapshot();
-        assert.ok(context.getDevToolsPage(page));
+        assert.ok(context.getDevToolsPage(page.pptrPage));
       },
       {
         autoOpenDevTools: true,
       },
     );
   });
+  it('resolves uid from a non-selected page snapshot', async () => {
+    await withMcpContext(async (_response, context) => {
+      // Page 1: set content and snapshot
+      const page1 = context.getSelectedMcpPage();
+      await page1.pptrPage.setContent(html`<button>Page1 Button</button>`);
+      await context.createTextSnapshot(page1, false, undefined);
+
+      // Capture a uid from page1's snapshot (snapshotId=1, button is node 1)
+      const page1Uid = '1_1';
+      const page1Node = context.getAXNodeByUid(page1Uid);
+      assert.ok(page1Node, 'uid should resolve from page1 snapshot');
+
+      // Page 2: new page, set content, snapshot
+      const page2 = await context.newPage();
+      context.selectPage(page2);
+      await page2.pptrPage.setContent(html`<button>Page2 Button</button>`);
+      await context.createTextSnapshot(page2, false, undefined);
+
+      // Page 2 is now selected. Page 1's uid should still resolve.
+      const node = context.getAXNodeByUid(page1Uid);
+      assert.ok(node, 'page1 uid should still resolve after page2 snapshot');
+      assert.strictEqual(node?.name, 'Page1 Button');
+
+      // The element should also be retrievable when the target page is provided.
+      const element = await page1.getElementByUid(page1Uid);
+      assert.ok(element, 'should get element handle from page1 snapshot uid');
+    });
+  });
+
   it('should include network requests in structured content', async t => {
     await withMcpContext(async (response, context) => {
       const mockRequest = getMockRequest({

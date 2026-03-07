@@ -22,7 +22,7 @@ describe('e2e', () => {
     const transport = new StdioClientTransport({
       command: 'node',
       args: [
-        'build/src/index.js',
+        'build/src/bin/chrome-devtools-mcp.js',
         '--headless',
         '--isolated',
         '--executable-path',
@@ -47,24 +47,17 @@ describe('e2e', () => {
       await client.close();
     }
   }
-  it('calls a tool', async () => {
+  it('calls a tool', async t => {
     await withClient(async client => {
       const result = await client.callTool({
         name: 'list_pages',
         arguments: {},
       });
-      assert.deepStrictEqual(result, {
-        content: [
-          {
-            type: 'text',
-            text: '# list_pages response\n## Pages\n1: about:blank [selected]',
-          },
-        ],
-      });
+      t.assert.snapshot?.(JSON.stringify(result.content));
     });
   });
 
-  it('calls a tool multiple times', async () => {
+  it('calls a tool multiple times', async t => {
     await withClient(async client => {
       let result = await client.callTool({
         name: 'list_pages',
@@ -74,14 +67,7 @@ describe('e2e', () => {
         name: 'list_pages',
         arguments: {},
       });
-      assert.deepStrictEqual(result, {
-        content: [
-          {
-            type: 'text',
-            text: '# list_pages response\n## Pages\n1: about:blank [selected]',
-          },
-        ],
-      });
+      t.assert.snapshot?.(JSON.stringify(result.content));
     });
   });
 
@@ -92,16 +78,35 @@ describe('e2e', () => {
       const files = fs.readdirSync('build/src/tools');
       const definedNames = [];
       for (const file of files) {
-        if (file === 'ToolDefinition.js') {
+        if (
+          file === 'ToolDefinition.js' ||
+          file === 'tools.js' ||
+          file === 'slim'
+        ) {
           continue;
         }
         const fileTools = await import(`../src/tools/${file}`);
-        for (const maybeTool of Object.values<ToolDefinition>(fileTools)) {
-          if ('name' in maybeTool) {
-            if (maybeTool.annotations?.conditions) {
+        for (const maybeTool of Object.values<unknown>(fileTools)) {
+          if (typeof maybeTool === 'function') {
+            const tool = (maybeTool as (val: boolean) => ToolDefinition)(false);
+            if (tool && typeof tool === 'object' && 'name' in tool) {
+              if (tool.annotations?.conditions) {
+                continue;
+              }
+              definedNames.push(tool.name);
+            }
+            continue;
+          }
+          if (
+            typeof maybeTool === 'object' &&
+            maybeTool !== null &&
+            'name' in maybeTool
+          ) {
+            const tool = maybeTool as ToolDefinition;
+            if (tool.annotations?.conditions) {
               continue;
             }
-            definedNames.push(maybeTool.name);
+            definedNames.push(tool.name);
           }
         }
       }

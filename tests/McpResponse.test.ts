@@ -64,14 +64,13 @@ describe('McpResponse', () => {
 
   it('does not include anything in response if snapshot is null', async t => {
     await withMcpContext(async (response, context) => {
-      const page = context.getSelectedPage();
+      const page = context.getSelectedPptrPage();
       page.accessibility.snapshot = async () => null;
       const {content, structuredContent} = await response.handle(
         'test',
         context,
       );
-      assert.equal(content[0].type, 'text');
-      assert.deepStrictEqual(getTextContent(content[0]), `# test response`);
+      t.assert.snapshot?.(getTextContent(content[0]));
       t.assert.snapshot?.(
         JSON.stringify(stabilizeStructuredContent(structuredContent), null, 2),
       );
@@ -80,7 +79,7 @@ describe('McpResponse', () => {
 
   it('returns correctly formatted snapshot for a simple tree', async t => {
     await withMcpContext(async (response, context) => {
-      const page = context.getSelectedPage();
+      const page = context.getSelectedPptrPage();
       await page.setContent(
         html`<button>Click me</button>
           <input
@@ -94,7 +93,6 @@ describe('McpResponse', () => {
         'test',
         context,
       );
-      assert.equal(content[0].type, 'text');
       t.assert.snapshot?.(getTextContent(content[0]));
       t.assert.snapshot?.(
         JSON.stringify(stabilizeStructuredContent(structuredContent), null, 2),
@@ -104,7 +102,7 @@ describe('McpResponse', () => {
 
   it('returns values for textboxes', async t => {
     await withMcpContext(async (response, context) => {
-      const page = context.getSelectedPage();
+      const page = context.getSelectedPptrPage();
       await page.setContent(
         html`<label
           >username<input
@@ -128,7 +126,7 @@ describe('McpResponse', () => {
 
   it('returns verbose snapshot and structured content', async t => {
     await withMcpContext(async (response, context) => {
-      const page = context.getSelectedPage();
+      const page = context.getSelectedPptrPage();
       await page.setContent(html`<aside>test</aside>`);
       response.includeSnapshot({
         verbose: true,
@@ -147,7 +145,7 @@ describe('McpResponse', () => {
     const filePath = join(tmpdir(), 'test-screenshot.png');
     try {
       await withMcpContext(async (response, context) => {
-        const page = context.getSelectedPage();
+        const page = context.getSelectedPptrPage();
         await page.setContent(html`<aside>test</aside>`);
         response.includeSnapshot({
           verbose: true,
@@ -178,7 +176,7 @@ describe('McpResponse', () => {
 
   it('preserves mapping ids across multiple snapshots', async () => {
     await withMcpContext(async (response, context) => {
-      const page = context.getSelectedPage();
+      const page = context.getSelectedPptrPage();
       await page.setContent(html`
         <div>
           <button id="btn1">Button 1</button>
@@ -253,7 +251,7 @@ describe('McpResponse', () => {
             </div>
           `,
         );
-        const page = context.getSelectedPage();
+        const page = context.getSelectedPptrPage();
         await page.goto(server.getRoute('/page.html'));
 
         response.includeSnapshot();
@@ -302,9 +300,8 @@ describe('McpResponse', () => {
         'test',
         context,
       );
-      await context.emulate({networkConditions: null});
-      assert.equal(content[0].type, 'text');
-      assert.strictEqual(getTextContent(content[0]), `# test response`);
+      await context.emulate({});
+      t.assert.snapshot?.(getTextContent(content[0]));
       t.assert.snapshot?.(
         JSON.stringify(stabilizeStructuredContent(structuredContent), null, 2),
       );
@@ -317,7 +314,7 @@ describe('McpResponse', () => {
         'test',
         context,
       );
-      assert.strictEqual(getTextContent(content[0]), `# test response`);
+      t.assert.snapshot?.(getTextContent(content[0]));
       assert.equal(content[1].type, 'image');
       assert.strictEqual(getImageContent(content[1]).data, 'imageBase64');
       assert.strictEqual(getImageContent(content[1]).mimeType, 'image/png');
@@ -348,7 +345,7 @@ describe('McpResponse', () => {
         'test',
         context,
       );
-      assert.strictEqual(getTextContent(content[0]), `# test response`);
+      t.assert.snapshot?.(getTextContent(content[0]));
       t.assert.snapshot?.(
         JSON.stringify(stabilizeStructuredContent(structuredContent), null, 2),
       );
@@ -401,13 +398,13 @@ describe('McpResponse', () => {
 
   it('adds a prompt dialog', async t => {
     await withMcpContext(async (response, context) => {
-      const page = context.getSelectedPage();
+      const page = context.getSelectedMcpPage();
       const dialogPromise = new Promise<void>(resolve => {
-        page.on('dialog', () => {
+        page.pptrPage.on('dialog', () => {
           resolve();
         });
       });
-      page.evaluate(() => {
+      page.pptrPage.evaluate(() => {
         prompt('message', 'default');
       });
       await dialogPromise;
@@ -415,7 +412,7 @@ describe('McpResponse', () => {
         'test',
         context,
       );
-      await context.getDialog()?.dismiss();
+      await page.getDialog()?.dismiss();
       t.assert.snapshot?.(getTextContent(content[0]));
       t.assert.snapshot?.(
         JSON.stringify(stabilizeStructuredContent(structuredContent), null, 2),
@@ -425,13 +422,13 @@ describe('McpResponse', () => {
 
   it('adds an alert dialog', async t => {
     await withMcpContext(async (response, context) => {
-      const page = context.getSelectedPage();
+      const page = context.getSelectedMcpPage();
       const dialogPromise = new Promise<void>(resolve => {
-        page.on('dialog', () => {
+        page.pptrPage.on('dialog', () => {
           resolve();
         });
       });
-      page.evaluate(() => {
+      page.pptrPage.evaluate(() => {
         alert('message');
       });
       await dialogPromise;
@@ -439,7 +436,7 @@ describe('McpResponse', () => {
         'test',
         context,
       );
-      await context.getDialog()?.dismiss();
+      await page.getDialog()?.dismiss();
       t.assert.snapshot?.(getTextContent(content[0]));
       t.assert.snapshot?.(
         JSON.stringify(stabilizeStructuredContent(structuredContent), null, 2),
@@ -474,7 +471,7 @@ describe('McpResponse', () => {
         'test',
         context,
       );
-      assert.strictEqual(getTextContent(content[0]), `# test response`);
+      t.assert.snapshot?.(getTextContent(content[0]));
       t.assert.snapshot?.(
         JSON.stringify(stabilizeStructuredContent(structuredContent), null, 2),
       );
@@ -544,7 +541,7 @@ describe('McpResponse', () => {
   it('adds console messages when the setting is true', async t => {
     await withMcpContext(async (response, context) => {
       response.setIncludeConsoleData(true);
-      const page = context.getSelectedPage();
+      const page = context.getSelectedPptrPage();
       const consoleMessagePromise = new Promise<void>(resolve => {
         page.on('console', () => {
           resolve();
@@ -968,6 +965,51 @@ describe('extensions', () => {
 
       t.assert.snapshot?.(getTextContent(content[0]));
       t.assert.snapshot?.(JSON.stringify(structuredContent, null, 2));
+    });
+  });
+});
+
+describe('lighthouse', () => {
+  it('includes lighthouse report paths', async t => {
+    await withMcpContext(async (response, context) => {
+      const lighthouseResult = {
+        summary: {
+          mode: 'navigation',
+          device: 'desktop',
+          url: 'https://example.com',
+          scores: [
+            {
+              id: 'performance',
+              title: 'Performance',
+              score: 0.9,
+            },
+          ],
+          audits: {
+            failed: 1,
+            passed: 10,
+          },
+          timing: {
+            total: 1000,
+          },
+        },
+        reports: ['/tmp/report.json', '/tmp/report.html'],
+      };
+
+      response.attachLighthouseResult(lighthouseResult);
+      const {content, structuredContent} = await response.handle(
+        'test',
+        context,
+      );
+
+      const text = getTextContent(content[0]);
+      assert.ok(text.includes('### Reports'));
+      assert.ok(text.includes('- /tmp/report.json'));
+      assert.ok(text.includes('- /tmp/report.html'));
+
+      t.assert.snapshot?.(getTextContent(content[0]));
+      t.assert.snapshot?.(
+        JSON.stringify(stabilizeStructuredContent(structuredContent), null, 2),
+      );
     });
   });
 });

@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {TextSnapshotNode, GeolocationOptions} from '../McpContext.js';
+import type {ParsedArguments} from '../bin/chrome-devtools-mcp-cli-options.js';
+import type {McpPage} from '../McpPage.js';
 import {zod} from '../third_party/index.js';
 import type {
   Dialog,
@@ -14,12 +15,17 @@ import type {
   Viewport,
 } from '../third_party/index.js';
 import type {InsightName, TraceResult} from '../trace-processing/parse.js';
+import type {
+  TextSnapshotNode,
+  GeolocationOptions,
+  ExtensionServiceWorker,
+} from '../types.js';
 import type {InstalledExtension} from '../utils/ExtensionRegistry.js';
 import type {PaginationOptions} from '../utils/types.js';
 
 import type {ToolCategory} from './categories.js';
 
-export interface ToolDefinition<
+export interface BaseToolDefinition<
   Schema extends zod.ZodRawShape = zod.ZodRawShape,
 > {
   name: string;
@@ -33,6 +39,12 @@ export interface ToolDefinition<
     readOnlyHint: boolean;
     conditions?: string[];
   };
+  schema: Schema;
+}
+
+export interface ToolDefinition<
+  Schema extends zod.ZodRawShape = zod.ZodRawShape,
+> extends BaseToolDefinition<Schema> {
   schema: Schema;
   handler: (
     request: Request<Schema>,
@@ -53,6 +65,27 @@ export interface ImageContentData {
 export interface SnapshotParams {
   verbose?: boolean;
   filePath?: string;
+}
+
+export interface LighthouseData {
+  summary: {
+    mode: string;
+    device: string;
+    url?: string;
+    scores: Array<{
+      id: string;
+      title: string;
+      score: number | null;
+    }>;
+    audits: {
+      failed: number;
+      passed: number;
+    };
+    timing: {
+      total: number;
+    };
+  };
+  reports: string[];
 }
 
 export interface DevToolsData {
@@ -95,6 +128,7 @@ export interface Response {
     insightName: InsightName,
   ): void;
   setListExtensions(): void;
+  attachLighthouseResult(result: LighthouseData): void;
 }
 
 /**
@@ -106,35 +140,29 @@ export type Context = Readonly<{
   isCruxEnabled(): boolean;
   recordedTraces(): TraceResult[];
   storeTraceRecording(result: TraceResult): void;
-  getSelectedPage(): Page;
-  getDialog(): Dialog | undefined;
-  clearDialog(): void;
-  getPageById(pageId: number): Page;
-  getPageId(page: Page): number | undefined;
-  isPageSelected(page: Page): boolean;
-  newPage(background?: boolean): Promise<Page>;
+  getPageById(pageId: number): ContextPage;
+  newPage(
+    background?: boolean,
+    isolatedContextName?: string,
+  ): Promise<ContextPage>;
   closePage(pageId: number): Promise<void>;
-  selectPage(page: Page): void;
-  getElementByUid(uid: string): Promise<ElementHandle<Element>>;
-  getAXNodeByUid(uid: string): TextSnapshotNode | undefined;
-  emulate(options: {
-    networkConditions?: string | null;
-    cpuThrottlingRate?: number | null;
-    geolocation?: GeolocationOptions | null;
-    userAgent?: string | null;
-    colorScheme?: 'dark' | 'light' | 'auto' | null;
-    viewport?: Viewport | null;
-  }): Promise<void>;
-  getNetworkConditions(): string | null;
-  getCpuThrottlingRate(): number;
-  getGeolocation(): GeolocationOptions | null;
-  getViewport(): Viewport | null;
-  getUserAgent(): string | null;
-  getColorScheme(): 'dark' | 'light' | null;
+  selectPage(page: ContextPage): void;
+  restoreEmulation(page: ContextPage): Promise<void>;
+  emulate(
+    options: {
+      networkConditions?: string;
+      cpuThrottlingRate?: number;
+      geolocation?: GeolocationOptions;
+      userAgent?: string;
+      colorScheme?: 'dark' | 'light' | 'auto';
+      viewport?: Viewport;
+    },
+    targetPage?: Page,
+  ): Promise<void>;
   saveTemporaryFile(
     data: Uint8Array<ArrayBufferLike>,
-    mimeType: 'image/png' | 'image/jpeg' | 'image/webp',
-  ): Promise<{filename: string}>;
+    filename: string,
+  ): Promise<{filepath: string}>;
   saveFile(
     data: Uint8Array<ArrayBufferLike>,
     filename: string,
@@ -143,34 +171,133 @@ export type Context = Readonly<{
     action: () => Promise<unknown>,
     options?: {timeout?: number},
   ): Promise<void>;
-  waitForTextOnPage(text: string, timeout?: number): Promise<Element>;
-  getDevToolsData(): Promise<DevToolsData>;
+  waitForTextOnPage(
+    text: string[],
+    timeout?: number,
+    page?: Page,
+  ): Promise<Element>;
+  getDevToolsData(page: ContextPage): Promise<DevToolsData>;
   /**
    * Returns a reqid for a cdpRequestId.
    */
-  resolveCdpRequestId(cdpRequestId: string): number | undefined;
-  /**
-   * Returns a reqid for a cdpRequestId.
-   */
-  resolveCdpElementId(cdpBackendNodeId: number): string | undefined;
+  resolveCdpRequestId(
+    page: ContextPage,
+    cdpRequestId: string,
+  ): number | undefined;
   getScreenRecorder(): {recorder: ScreenRecorder; filePath: string} | null;
   setScreenRecorder(
     data: {recorder: ScreenRecorder; filePath: string} | null,
   ): void;
   installExtension(path: string): Promise<string>;
   uninstallExtension(id: string): Promise<void>;
+  triggerExtensionAction(id: string): Promise<void>;
   listExtensions(): InstalledExtension[];
   getExtension(id: string): InstalledExtension | undefined;
+  getSelectedMcpPage(): McpPage;
+  getExtensionServiceWorkers(): ExtensionServiceWorker[];
+  getExtensionServiceWorkerId(
+    extensionServiceWorker: ExtensionServiceWorker,
+  ): string | undefined;
+}>;
+
+export type ContextPage = Readonly<{
+  readonly pptrPage: Page;
+  getAXNodeByUid(uid: string): TextSnapshotNode | undefined;
+  getElementByUid(uid: string): Promise<ElementHandle<Element>>;
+
+  getDialog(): Dialog | undefined;
+  clearDialog(): void;
 }>;
 
 export function defineTool<Schema extends zod.ZodRawShape>(
   definition: ToolDefinition<Schema>,
+): ToolDefinition<Schema>;
+
+export function defineTool<
+  Schema extends zod.ZodRawShape,
+  Args extends ParsedArguments = ParsedArguments,
+>(
+  definition: (args?: Args) => ToolDefinition<Schema>,
+): (args?: Args) => ToolDefinition<Schema>;
+
+export function defineTool<
+  Schema extends zod.ZodRawShape,
+  Args extends ParsedArguments = ParsedArguments,
+>(
+  definition:
+    | ToolDefinition<Schema>
+    | ((args?: Args) => ToolDefinition<Schema>),
 ) {
+  if (typeof definition === 'function') {
+    const factory = definition;
+    return (args: Args) => {
+      return factory(args);
+    };
+  }
   return definition;
+}
+
+interface PageToolDefinition<
+  Schema extends zod.ZodRawShape = zod.ZodRawShape,
+> extends BaseToolDefinition<Schema> {
+  handler: (
+    request: Request<Schema> & {page: ContextPage},
+    response: Response,
+    context: Context,
+  ) => Promise<void>;
+}
+
+export type DefinedPageTool<Schema extends zod.ZodRawShape = zod.ZodRawShape> =
+  PageToolDefinition<Schema> & {
+    pageScoped: true;
+    handler: (
+      request: Request<Schema> & {page: ContextPage},
+      response: Response,
+      context: Context,
+    ) => Promise<void>;
+  };
+
+export function definePageTool<Schema extends zod.ZodRawShape>(
+  definition: PageToolDefinition<Schema>,
+): DefinedPageTool<Schema>;
+
+export function definePageTool<
+  Schema extends zod.ZodRawShape,
+  Args extends ParsedArguments = ParsedArguments,
+>(
+  definition: (args?: Args) => PageToolDefinition<Schema>,
+): (args?: Args) => DefinedPageTool<Schema>;
+
+export function definePageTool<
+  Schema extends zod.ZodRawShape,
+  Args extends ParsedArguments = ParsedArguments,
+>(
+  definition:
+    | PageToolDefinition<Schema>
+    | ((args?: Args) => PageToolDefinition<Schema>),
+): DefinedPageTool<Schema> | ((args?: Args) => DefinedPageTool<Schema>) {
+  if (typeof definition === 'function') {
+    return (args?: Args): DefinedPageTool<Schema> => {
+      const tool = definition(args);
+      return {
+        ...tool,
+        pageScoped: true,
+      };
+    };
+  }
+
+  return {
+    ...definition,
+    pageScoped: true,
+  } as DefinedPageTool<Schema>;
 }
 
 export const CLOSE_PAGE_ERROR =
   'The last open page cannot be closed. It is fine to keep it open.';
+
+export const pageIdSchema = {
+  pageId: zod.number().optional().describe('Targets a specific page by ID.'),
+};
 
 export const timeoutSchema = {
   timeout: zod
@@ -184,3 +311,46 @@ export const timeoutSchema = {
       return value && value <= 0 ? undefined : value;
     }),
 };
+
+export function viewportTransform(arg: string | undefined):
+  | {
+      width: number;
+      height: number;
+      deviceScaleFactor?: number;
+      isMobile?: boolean;
+      isLandscape?: boolean;
+      hasTouch?: boolean;
+    }
+  | undefined {
+  if (!arg) {
+    return undefined;
+  }
+  const [dimensions, ...tags] = arg.split(',');
+  const isMobile = tags.includes('mobile');
+  const hasTouch = tags.includes('touch');
+  const isLandscape = tags.includes('landscape');
+  const [width, height, dpr] = dimensions.split('x').map(Number) as [
+    number,
+    number,
+    number | undefined,
+  ];
+  return {
+    width,
+    height,
+    deviceScaleFactor: dpr,
+    isMobile: isMobile,
+    isLandscape: isLandscape,
+    hasTouch: hasTouch,
+  };
+}
+
+export function geolocationTransform(arg: string | undefined) {
+  if (!arg) {
+    return undefined;
+  }
+  const [latitude, longitude] = arg.split('x').map(Number) as [number, number];
+  return {
+    latitude,
+    longitude,
+  };
+}

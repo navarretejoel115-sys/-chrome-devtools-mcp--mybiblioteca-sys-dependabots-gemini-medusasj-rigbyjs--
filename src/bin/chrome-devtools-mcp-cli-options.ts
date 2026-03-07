@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {YargsOptions} from './third_party/index.js';
-import {yargs, hideBin} from './third_party/index.js';
+import type {YargsOptions} from '../third_party/index.js';
+import {yargs, hideBin} from '../third_party/index.js';
 
 export const cliOptions = {
   autoConnect: {
     type: 'boolean',
     description:
-      'If specified, automatically connects to a browser (Chrome 144+) running in the user data directory identified by the channel param. Requires the remoted debugging server to be started in the Chrome instance via chrome://inspect/#remote-debugging.',
+      'If specified, automatically connects to a browser (Chrome 144+) running locally from the user data directory identified by the channel param (default channel is stable). Requires the remoted debugging server to be started in the Chrome instance via chrome://inspect/#remote-debugging.',
     conflicts: ['isolated', 'executablePath'],
     default: false,
     coerce: (value: boolean | undefined) => {
@@ -147,6 +147,12 @@ export const cliOptions = {
     type: 'boolean',
     description: `If enabled, ignores errors relative to self-signed and expired certificates. Use with caution.`,
   },
+  experimentalPageIdRouting: {
+    type: 'boolean',
+    describe:
+      'Whether to expose pageId on page-scoped tools and route requests by page ID.',
+    hidden: true,
+  },
   experimentalDevtools: {
     type: 'boolean',
     describe: 'Whether to enable automation over DevTools targets',
@@ -236,7 +242,20 @@ export const cliOptions = {
     hidden: true,
     describe: 'Include watchdog PID in Clearcut request headers (for testing).',
   },
+  slim: {
+    type: 'boolean',
+    describe:
+      'Exposes a "slim" set of 3 tools covering navigation, script execution and screenshots only. Useful for basic browser tasks.',
+  },
+  viaCli: {
+    type: 'boolean',
+    describe:
+      'Set by Chrome DevTools CLI if the MCP server is started via the CLI client (this arg exists for usage stats)',
+    hidden: true,
+  },
 } satisfies Record<string, YargsOptions>;
+
+export type ParsedArguments = ReturnType<typeof parseArguments>;
 
 export function parseArguments(version: string, argv = process.argv) {
   const yargsInstance = yargs(hideBin(argv))
@@ -311,6 +330,10 @@ export function parseArguments(version: string, argv = process.argv) {
       [
         '$0 --no-performance-crux',
         'Disable CrUX (field data) integration in performance tools.',
+      ],
+      [
+        '$0 --slim',
+        'Only 3 tools: navigation, JavaScript execution and screenshot',
       ],
     ]);
 

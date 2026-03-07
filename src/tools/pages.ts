@@ -5,23 +5,30 @@
  */
 
 import {logger} from '../logger.js';
-import type {Dialog} from '../third_party/index.js';
+import type {CdpPage, Dialog} from '../third_party/index.js';
 import {zod} from '../third_party/index.js';
 
 import {ToolCategory} from './categories.js';
-import {CLOSE_PAGE_ERROR, defineTool, timeoutSchema} from './ToolDefinition.js';
+import {
+  CLOSE_PAGE_ERROR,
+  definePageTool,
+  defineTool,
+  timeoutSchema,
+} from './ToolDefinition.js';
 
-export const listPages = defineTool({
-  name: 'list_pages',
-  description: `Get a list of pages open in the browser.`,
-  annotations: {
-    category: ToolCategory.NAVIGATION,
-    readOnlyHint: true,
-  },
-  schema: {},
-  handler: async (_request, response) => {
-    response.setIncludePages(true);
-  },
+export const listPages = definePageTool(args => {
+  return {
+    name: 'list_pages',
+    description: `Get a list of pages ${args?.categoryExtensions ? 'including extension service workers' : ''} open in the browser.`,
+    annotations: {
+      category: ToolCategory.NAVIGATION,
+      readOnlyHint: true,
+    },
+    schema: {},
+    handler: async (_request, response) => {
+      response.setIncludePages(true);
+    },
+  };
 });
 
 export const selectPage = defineTool({
@@ -35,7 +42,7 @@ export const selectPage = defineTool({
     pageId: zod
       .number()
       .describe(
-        `The ID of the page to select. Call ${listPages.name} to get available pages.`,
+        `The ID of the page to select. Call ${listPages().name} to get available pages.`,
       ),
     bringToFront: zod
       .boolean()
@@ -47,7 +54,7 @@ export const selectPage = defineTool({
     context.selectPage(page);
     response.setIncludePages(true);
     if (request.params.bringToFront) {
-      await page.bringToFront();
+      await page.pptrPage.bringToFront();
     }
   },
 });
@@ -80,7 +87,7 @@ export const closePage = defineTool({
 
 export const newPage = defineTool({
   name: 'new_page',
-  description: `Creates a new page`,
+  description: `Open a new tab and load a URL. Use project URL if not specified otherwise.`,
   annotations: {
     category: ToolCategory.NAVIGATION,
     readOnlyHint: false,
@@ -93,14 +100,25 @@ export const newPage = defineTool({
       .describe(
         'Whether to open the page in the background without bringing it to the front. Default is false (foreground).',
       ),
+    isolatedContext: zod
+      .string()
+      .optional()
+      .describe(
+        'If specified, the page is created in an isolated browser context with the given name. ' +
+          'Pages in the same browser context share cookies and storage. ' +
+          'Pages in different browser contexts are fully isolated.',
+      ),
     ...timeoutSchema,
   },
   handler: async (request, response, context) => {
-    const page = await context.newPage(request.params.background);
+    const page = await context.newPage(
+      request.params.background,
+      request.params.isolatedContext,
+    );
 
     await context.waitForEventsAfterAction(
       async () => {
-        await page.goto(request.params.url, {
+        await page.pptrPage.goto(request.params.url, {
           timeout: request.params.timeout,
         });
       },
@@ -111,9 +129,9 @@ export const newPage = defineTool({
   },
 });
 
-export const navigatePage = defineTool({
+export const navigatePage = definePageTool({
   name: 'navigate_page',
-  description: `Navigates the currently selected page to a URL.`,
+  description: `Go to a URL, or back, forward, or reload. Use project URL if not specified otherwise.`,
   annotations: {
     category: ToolCategory.NAVIGATION,
     readOnlyHint: false,
@@ -145,7 +163,7 @@ export const navigatePage = defineTool({
     ...timeoutSchema,
   },
   handler: async (request, response, context) => {
-    const page = context.getSelectedPage();
+    const page = request.page;
     const options = {
       timeout: request.params.timeout,
     };
@@ -169,19 +187,19 @@ export const navigatePage = defineTool({
           void dialog.dismiss();
         }
         // We are not going to report the dialog like regular dialogs.
-        context.clearDialog();
+        page.clearDialog();
       }
     };
 
     let initScriptId: string | undefined;
     if (request.params.initScript) {
-      const {identifier} = await page.evaluateOnNewDocument(
+      const {identifier} = await page.pptrPage.evaluateOnNewDocument(
         request.params.initScript,
       );
       initScriptId = identifier;
     }
 
-    page.on('dialog', dialogHandler);
+    page.pptrPage.on('dialog', dialogHandler);
 
     try {
       await context.waitForEventsAfterAction(
@@ -194,7 +212,7 @@ export const navigatePage = defineTool({
                 );
               }
               try {
-                await page.goto(request.params.url, options);
+                await page.pptrPage.goto(request.params.url, options);
                 response.appendResponseLine(
                   `Successfully navigated to ${request.params.url}.`,
                 );
@@ -206,9 +224,9 @@ export const navigatePage = defineTool({
               break;
             case 'back':
               try {
-                await page.goBack(options);
+                await page.pptrPage.goBack(options);
                 response.appendResponseLine(
-                  `Successfully navigated back to ${page.url()}.`,
+                  `Successfully navigated back to ${page.pptrPage.url()}.`,
                 );
               } catch (error) {
                 response.appendResponseLine(
@@ -218,9 +236,9 @@ export const navigatePage = defineTool({
               break;
             case 'forward':
               try {
-                await page.goForward(options);
+                await page.pptrPage.goForward(options);
                 response.appendResponseLine(
-                  `Successfully navigated forward to ${page.url()}.`,
+                  `Successfully navigated forward to ${page.pptrPage.url()}.`,
                 );
               } catch (error) {
                 response.appendResponseLine(
@@ -230,7 +248,7 @@ export const navigatePage = defineTool({
               break;
             case 'reload':
               try {
-                await page.reload({
+                await page.pptrPage.reload({
                   ...options,
                   ignoreCache: request.params.ignoreCache,
                 });
@@ -246,9 +264,9 @@ export const navigatePage = defineTool({
         {timeout: request.params.timeout},
       );
     } finally {
-      page.off('dialog', dialogHandler);
+      page.pptrPage.off('dialog', dialogHandler);
       if (initScriptId) {
-        await page
+        await page.pptrPage
           .removeScriptToEvaluateOnNewDocument(initScriptId)
           .catch(error => {
             logger(`Failed to remove init script`, error);
@@ -260,7 +278,7 @@ export const navigatePage = defineTool({
   },
 });
 
-export const resizePage = defineTool({
+export const resizePage = definePageTool({
   name: 'resize_page',
   description: `Resizes the selected page's window so that the page has specified dimension`,
   annotations: {
@@ -271,12 +289,12 @@ export const resizePage = defineTool({
     width: zod.number().describe('Page width'),
     height: zod.number().describe('Page height'),
   },
-  handler: async (request, response, context) => {
-    const page = context.getSelectedPage();
+  handler: async (request, response, _context) => {
+    const page = request.page;
 
     try {
-      const browser = page.browser();
-      const windowId = await page.windowId();
+      const browser = page.pptrPage.browser();
+      const windowId = await page.pptrPage.windowId();
 
       const bounds = await browser.getWindowBounds(windowId);
 
@@ -290,7 +308,7 @@ export const resizePage = defineTool({
     } catch {
       // Window APIs are not supported on all platforms
     }
-    await page.resize({
+    await page.pptrPage.resize({
       contentWidth: request.params.width,
       contentHeight: request.params.height,
     });
@@ -299,7 +317,7 @@ export const resizePage = defineTool({
   },
 });
 
-export const handleDialog = defineTool({
+export const handleDialog = definePageTool({
   name: 'handle_dialog',
   description: `If a browser dialog was opened, use this command to handle it`,
   annotations: {
@@ -315,8 +333,9 @@ export const handleDialog = defineTool({
       .optional()
       .describe('Optional prompt text to enter into the dialog.'),
   },
-  handler: async (request, response, context) => {
-    const dialog = context.getDialog();
+  handler: async (request, response, _context) => {
+    const page = request.page;
+    const dialog = page.getDialog();
     if (!dialog) {
       throw new Error('No open dialog found');
     }
@@ -344,12 +363,12 @@ export const handleDialog = defineTool({
       }
     }
 
-    context.clearDialog();
+    page.clearDialog();
     response.setIncludePages(true);
   },
 });
 
-export const getTabId = defineTool({
+export const getTabId = definePageTool({
   name: 'get_tab_id',
   description: `Get the tab ID of the page`,
   annotations: {
@@ -361,13 +380,12 @@ export const getTabId = defineTool({
     pageId: zod
       .number()
       .describe(
-        `The ID of the page to get the tab ID for. Call ${listPages.name} to get available pages.`,
+        `The ID of the page to get the tab ID for. Call ${listPages().name} to get available pages.`,
       ),
   },
   handler: async (request, response, context) => {
     const page = context.getPageById(request.params.pageId);
-    // @ts-expect-error _tabId is internal.
-    const tabId = page._tabId;
+    const tabId = (page.pptrPage as unknown as CdpPage)._tabId;
     response.setTabId(tabId);
   },
 });
