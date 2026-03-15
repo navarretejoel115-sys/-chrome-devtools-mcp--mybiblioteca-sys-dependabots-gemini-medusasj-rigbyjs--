@@ -1,4 +1,5 @@
-# Chrome DevTools MCP
+# Chrome DevTools MCP 
+pkgs.alpinelinux.org/packages
 feat/navarrete115-biblioteca-scaffold):
 [![npm chrome-devtools-mcp package](https://img.shields.io/npm/v/chrome-devtools-mcp.svg)](https://npmjs.org/package/chrome-devtools-mcp)
 
